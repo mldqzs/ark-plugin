@@ -33,7 +33,7 @@ export const cfgSchema = {
       lnFiles: {
         title: '软链接文件',
         key: '软链接',
-        def: false,
+        def: true,
         desc: '首次替换后使用软链接更新文件，插件更新后无需重复替换'
       },
       profileChangeDiff: {
