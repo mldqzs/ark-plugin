@@ -3,9 +3,6 @@
       "src": "./plugins/ark-plugin/backup/miao-plugin-rank",
       "dest": "./plugins/miao-plugin",
       "srcfile": [
-        "apps/profile/ProfileDetail.js",
-        "apps/profile/ProfileRank.js",
-        "apps/profile.js",
         "resources/character/rank-profile-list.html",
         "resources/character/profile-detail.html"
       ]
@@ -14,8 +11,6 @@
       "src": "./plugins/ark-plugin/backup/miao-plugin-rank-qsyhh",
       "dest": "./plugins/miao-plugin",
       "srcfile": [
-        "apps/profile/ProfileDetail.js",
-        "apps/profile/ProfileRank.js",
         "resources/character/rank-profile-list.html",
         "resources/character/profile-detail.html"
       ]

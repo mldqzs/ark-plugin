@@ -17,6 +17,9 @@
 
 ---
 
+> [!IMPORTANT]
+> 本仓库是为适配 [mldqzs/miao-plugin](https://github.com/mldqzs/miao-plugin) 而维护的 Ark-plugin 分支。如果你使用的是原版 miao-plugin，则不需要使用本分支，请使用[原版 Ark-plugin](https://github.com/NotIvny/ark-plugin)。除针对该 miao-plugin 分支的兼容适配外，其余功能与运行逻辑均与原版 Ark-plugin 保持一致。
+
 ## 📦 安装
 
 推荐使用 `git` 进行安装。
@@ -33,9 +36,13 @@ git clone https://gitcode.com/EmptyLava/ark-plugin.git ./plugins/ark-plugin
 
 ## 🛠️ 配置与替换
 
+Ark 会优先通过运行时接口集成已安装的 miao-plugin。ProfileDetail 与 ProfileRank 会独立检测：如果当前 miao 版本没有可注入的排行接口，Ark 只跳过排行增强，普通 miao 排行和面板功能仍保持可用。
+
+面板自动推荐等 miao 定制逻辑会保留，Ark 不会在启动时覆盖 miao-plugin 的核心 JavaScript。HTML/CSS 资源链接可通过 `lnFiles` 按需启用；文件替换命令仅适用于明确的手动迁移场景，可能覆盖本地定制代码，请勿将其作为常规安装步骤。
+
 | 功能名 | 是否需要替换文件 | 替换命令 | 说明 |
 | :--- | :---: | :--- | :--- |
-| **角色排名拓展** | ✅ | `#ark替换文件miao-rank` | 实现排名、伤害变化、OCR等功能 |
+| **角色排名拓展** | ❌ | / | 优先使用运行时接口；不兼容时安全跳过 Ark 排行增强 |
 | **喵喵帮助拓展** | ✅ | `#ark替换文件miao-help` | 不支持qsyhh/miao-plugin |
 | **幽境危战排名** | ❌ | / |  |
 | **喵喵设置扩展** | ❌ | / | 不支持qsyhh/miao-plugin |
@@ -43,7 +50,7 @@ git clone https://gitcode.com/EmptyLava/ark-plugin.git ./plugins/ark-plugin
 | **文件备份** | ❌ | / |  |
 
 > [!TIP]
-> 安装后输入 `#ark替换文件miao-rank`，**重启机器人**后即可使用全部功能。`#ark替换文件miao-help` **按需开启**。
+> 启动日志会分别显示 ProfileDetail、ProfileRank 与幽境危战的状态。只有在确认目标 miao 版本兼容、且已备份定制文件时，才手动使用文件替换命令。
 > 
 > 如需备份原文件，请在替换前输入 `#ark备份文件miao-rank` 或 `#ark备份文件miao-help`。
 

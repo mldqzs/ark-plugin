@@ -1,159 +1,57 @@
-import lodash from 'lodash'
 import ProfileList from '../../miao-plugin/apps/profile/ProfileList.js'
-import { getTargetUid } from '../../miao-plugin/apps/profile/ProfileCommon.js'
-import { Button, MysApi, Player } from '../../miao-plugin/models/index.js'
 import { getStygianVersion } from '../../ark-plugin/model/calcVersion.js'
-import ProfileReq from '../../miao-plugin/models/serv/ProfileReq.js'
-import Character from '../../miao-plugin/models/Character.js'
+import ProfileServ from '../../miao-plugin/models/serv/ProfileServ.js'
 import ArkCfg from '../components/Cfg.js'
 const stygianInit = {
   init() {
     if (!ArkCfg.get('stygianRank', false)) {
       return false
     }
-    ProfileList.doRefresh = async (e, fromMys = false) => {
-      let uid = await getTargetUid(e)
-      if (!uid) {
-        e._replyNeedUid || e.reply(['请先发送【#绑定+你的UID】来绑定查询目标\n星铁请使用【#星铁绑定+UID】', new Button(e).bindUid()])
-        return true
-      }
-
-      // 数据更新
-      let player = Player.create(e)
-      await player.refreshProfile(2, fromMys)    
-
-      if (!player?._update?.length) {
-        e._isReplyed || e.reply(['获取角色面板数据失败，请确认角色已在游戏内橱窗展示，并开放了查看详情。设置完毕后请5分钟后再进行请求~', new Button(e).profileList(uid)])
-        e._isReplyed = true
-      } else {
-        let ret = {}
-        lodash.forEach(player._update, (id) => {
-          let char = Character.get(id)
-          if (char) {
-            ret[char.name] = true
+    if (!ProfileList.doRefresh._arkStygianWrapped) {
+      const originalDoRefresh = ProfileList.doRefresh.bind(ProfileList)
+      const wrappedDoRefresh = async (e, fromMys = false) => {
+        const result = await originalDoRefresh(e, fromMys)
+        try {
+          const uid = e.uid
+          const bindThisUid = e.runtime?.user && e.game === 'gs'
+            ? e.runtime.user.hasUid(uid, e.game)
+            : false
+          if (uid && e.group_id && bindThisUid) {
+            const stygianVersion = getStygianVersion()
+            const stygianTime = await redis.get(`ark-plugin:stygianInfo:${stygianVersion}:${uid}`)
+            if (stygianTime && String(stygianTime) !== '-1') {
+              await redis.zAdd(`ark-plugin:stygianRank:${stygianVersion}:${e.group_id}`, {
+                score: stygianTime,
+                value: String(uid)
+              })
+            }
           }
-        })
-        let bindThisUid = false
-        if (e.runtime && e.runtime?.user && e.game === 'gs') {
-          let user = e.runtime.user
-          bindThisUid = user.hasUid(uid, e.game)
+        } catch (err) {
+          logger.error('幽境危战排名更新失败', err)
         }
-        if (uid && e.group_id && bindThisUid) {
-          let stygianVersion = getStygianVersion()
-          let stygianTime = await redis.get(`ark-plugin:stygianInfo:${stygianVersion}:${uid}`)
-          if (stygianTime && stygianTime !== -1) {
-            logger.error('push')
-            await redis.zAdd(`ark-plugin:stygianRank:${stygianVersion}:${e.group_id}`, { 
-              score: stygianTime, 
-              value: String(uid) 
-            })
-          }
-        }
-        if (lodash.isEmpty(ret)) {
-          e._isReplyed || e.reply(['获取角色面板数据失败，未能请求到角色数据。请确认角色已在游戏内橱窗展示，并开放了查看详情。设置完毕后请5分钟后再进行请求~', new Button(e).profileList(uid)])
-          e._isReplyed = true
-        } else {
-          e.newChar = ret
-          e.isNewCharFromMys = fromMys
-          // eslint-disable-next-line no-return-await
-          return await ProfileList.render(e)
-        }
+        return result
       }
-      return true
+      wrappedDoRefresh._arkStygianWrapped = true
+      ProfileList.doRefresh = wrappedDoRefresh
     }
-    ProfileReq.prototype.requestProfile = async function (player, serv) {
-      let self = this
-      this.serv = serv
-      let uid = this.uid
-      let reqParam = await serv.getReqParam(uid, player.game)
-      let cdTime = await this.inCd()
-      if (cdTime && !process.argv.includes('web-debug')) {
-        // return this.err(`请求过快，请${cdTime}秒后重试..`)
-      }
-      await this.setCd(20)
-      // 若3秒后还未响应则返回提示
-      setTimeout(() => {
-        if (self._isReq) {
-          this.e.reply(`开始获取uid:${uid}的数据，可能会需要一定时间~`)
+    if (!ProfileServ.prototype.updatePlayer._arkStygianWrapped) {
+      const originalUpdatePlayer = ProfileServ.prototype.updatePlayer
+      const wrappedUpdatePlayer = function (player, data) {
+        const stygianVersion = getStygianVersion()
+        if (data?.uid && stygianVersion !== -1) {
+          const score = data.playerInfo?.stygianSeconds && data.playerInfo?.stygianIndex
+            ? data.playerInfo.stygianSeconds + (6 - data.playerInfo.stygianIndex) * 2048
+            : -1
+          void redis.set(`ark-plugin:stygianInfo:${stygianVersion}:${data.uid}`, score).catch((err) => {
+            logger.error('幽境危战数据缓存失败', err)
+          })
         }
-      }, 2000)
-      // 发起请求
-      this.log(`${logger.yellow('开始请求数据')}，面板服务：${serv.name}...`)
-      const startTime = new Date() * 1
-      let data = {}
-      let timerId
-      try {
-        let params = reqParam.params || {}
-        params.timeout = params.timeout || 1000 * 20
-        const controller = new AbortController()
-        timerId = setTimeout(() => controller.abort(), params.timeout)
-        params.signal = controller.signal
-        self._isReq = true
-        let mys
-        switch (serv._cfg.id) {
-          case 'mysPanel':
-            mys = await MysApi.init(player.e, 'cookie')
-            // 获取所有的 Character ID
-            // TODO: 要不要从 player._avatars 里面直接提取所有键作为 character_ids？
-            //       不这样做主要是不知道 player._avatars 角色是否为最新
-            //
-            // TODO: 加入仅利用米游社更新部分角色面板，其中部分角色是所有角色的子集
-            const character = await mys.getCharacter()
-            const character_ids = lodash.map(character.list, (c) => c.id) // .toString() // .slice(0, 2)
-            data = JSON.stringify(await mys.getCharacterDetail(character_ids)) // 跟下面的保持一致
-            break
-          case 'mysPanelHSR':
-            mys = await MysApi.init(player.e, 'cookie')
-            // 这里的 MysApi 没有完成对星铁 API 的封装，所以暂时先直接使用 getData 调用获取角色面板
-            // 值得注意的是原神的角色面板 API 是需要传带查询角色列表的；但是星铁的角色面板 API 是不需要传待查询角色列表的
-            data = JSON.stringify(await mys.getData('avatarInfo')) // 跟下面的保持一致
-            break
-          default:
-            let req = await fetch(reqParam.url, params)
-            data = await req.text()
-        }
-        clearTimeout(timerId)
-        self._isReq = false
-        const reqTime = new Date() * 1 - startTime
-        this.log(`${logger.green(`请求结束，请求用时${reqTime}ms`)}，面板服务：${serv.name}...`)
-        if (data[0] === '<') {
-          let titleRet = /<title>(.+)<\/title>/.exec(data)
-          if (titleRet && titleRet[1]) {
-            data = { error: titleRet[1] }
-          } else {
-            return this.err('error', 60)
-          }
-        } else {
-          data = JSON.parse(data)
-        }
-      } catch (e) {
-        logger.error('面板请求错误', e)
-        clearTimeout(timerId)
-        self._isReq = false
-        data = {}
+        return originalUpdatePlayer.call(this, player, data)
       }
-      data = await serv.response(data, this, player.game)
-      let stygianVersion = getStygianVersion()
-      if (data?.playerInfo?.stygianSeconds && data?.playerInfo?.stygianIndex && data?.uid && stygianVersion !== -1) {
-        await redis.set(`ark-plugin:stygianInfo:${stygianVersion}:${data.uid}`, data.playerInfo.stygianSeconds + (6 - data.playerInfo.stygianIndex) * 2048)
-      } else if (data?.uid && stygianVersion !== -1) {
-        await redis.set(`ark-plugin:stygianInfo:${stygianVersion}:${data.uid}`, -1)
-      }
-      // 设置CD
-      cdTime = serv.getCdTime(data)
-      if (cdTime) {
-        await this.setCd(cdTime)
-      }
-      if (data === false) {
-        return false
-      }
-      serv.updatePlayer(player, data)
-      cdTime = serv.getCdTime(data)
-      if (cdTime) {
-        await this.setCd(cdTime)
-      }
-      return player
+      wrappedUpdatePlayer._arkStygianWrapped = true
+      ProfileServ.prototype.updatePlayer = wrappedUpdatePlayer
     }
+    return true
   }
 }
-export default stygianInit 
+export default stygianInit

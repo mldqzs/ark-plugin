@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import path from 'node:path'
 import { Version } from './components/index.js'
 
 if (!global.segment) {
@@ -41,14 +42,29 @@ let arkInitStatus = null
 let stygianInitStatus = false
 const createSymlink = ({ src, dest }) => {
   try {
-    fs.lstatSync(src)
+    const current = fs.lstatSync(src)
+    if (!current.isSymbolicLink()) {
+      logger.warn(`[ark-plugin] 资源路径已存在且不是软链接，未覆盖: ${src}`)
+      return
+    }
+    const currentTarget = fs.readlinkSync(src)
+    const resolvedCurrent = path.resolve(path.dirname(src), currentTarget)
+    const resolvedDest = path.resolve(path.dirname(src), dest)
+    if (resolvedCurrent !== resolvedDest) {
+      fs.unlinkSync(src)
+      fs.symlinkSync(dest, src, 'file')
+    }
     symlinkCount++
-  } catch {
+  } catch (err) {
+    if (err?.code !== 'ENOENT') {
+      logger.error(`检查软链接文件时出现问题 ${err}`)
+      return
+    }
     try {
       fs.symlinkSync(dest, src, 'file')
       symlinkCount++
-    } catch (err) {
-      logger.error(`软链接文件时出现问题 ${err}`)
+    } catch (linkErr) {
+      logger.error(`软链接文件时出现问题 ${linkErr}`)
     }
   }
 }
@@ -104,20 +120,19 @@ try {
 
 if (stygianInit?.init) {
   try {
-    stygianInit.init()
-    stygianInitStatus = true
+    stygianInitStatus = stygianInit.init() !== false
   } catch (err) {
     logger.error('幽境危战初始化失败', err)
   }
 }
 
-const lnStatus = symlinkCount > 0 
-  ? logger.green(`✔ 已链接 ${symlinkCount} 个文件`) 
+const lnStatus = symlinkCount > 0
+  ? logger.green(`✔ 已链接 ${symlinkCount} 个文件`)
   : logger.red('⚠ 未启用或无链接')
 const profileDetailStatus = arkInitStatus?.ProfileDetail || logger.red('✖ 注入失败（初始化异常）')
 const charRankStatus = arkInitStatus?.CharRank || logger.red('✖ 注入失败（初始化异常）')
-const stygianStatus = stygianInitStatus 
-  ? logger.green('✔ 注入成功') 
+const stygianStatus = stygianInitStatus
+  ? logger.green('✔ 注入成功')
   : logger.red('✖ 注入失败')
 let uiOutput = `
 ${logger.green('==============ark-plugin加载完毕===============')}
@@ -129,10 +144,17 @@ ${logger.green('==============ark-plugin加载完毕===============')}
 `
 if (arkInitStatus?.shouldReplace) {
   uiOutput += `
-${logger.red('⚠ 检测到核心文件未替换，请执行 #ark替换文件miao-rank 以使用完整功能')}
+${logger.red('⚠ 当前miao-plugin版本缺少ark所需模块，相关功能已跳过；请更新ark-plugin或miao-plugin，不要覆盖miao核心文件')}
 `
 }
-uiOutput += logger.green('===============================================')
+uiOutput += `
+${logger.green('miao-plugin 核心 JavaScript 未被覆盖；自动推荐仍由当前 miao 面板逻辑处理')}
+`
+if (arkInitStatus?.profileRank?.state === 'incompatible') {
+  uiOutput += `
+${logger.yellow(`ProfileRank Ark 增强已跳过：${arkInitStatus.profileRank.reason || '当前接口不兼容'}；普通 miao 排行保持不变`)}
+`
+}
 
 logger.info(uiOutput)
 export { apps }

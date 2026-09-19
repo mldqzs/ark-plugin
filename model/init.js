@@ -13,23 +13,35 @@ import { ArkApi, AkashaApi } from './api.js'
 
 let ProfileDetail
 let CharRank
+let ProfileRankModule
 let ProfileDetailStatus = null
 let CharRankStatus = null
+let ProfileRankReason = ''
+let ProfileRankHooked = false
 try {
   ProfileDetail = (await import('../../miao-plugin/apps/profile/ProfileDetail.js')).default
-  if (ProfileDetail) {
-    ProfileDetailStatus = logger.green('✔ 注入成功')
+  if (ProfileDetail && typeof ProfileDetail.render === 'function') {
+    ProfileDetailStatus = logger.green('✔ 模块可用')
+  } else {
+    ProfileDetailStatus = logger.yellow('⚠ 接口不兼容')
   }
 } catch (err) {
-  ProfileDetailStatus = `${logger.red('✖ 注入失败')}\n${logger.red(err?.message || err)}`
+  ProfileDetailStatus = `${logger.red('✖ 加载失败')}\n${logger.red(err?.message || err)}`
 }
 try {
-  CharRank = (await import('../../miao-plugin/apps/profile/ProfileRank.js')).default
-  if (CharRank) {
-    CharRankStatus = logger.green('✔ 注入成功')
+  ProfileRankModule = await import('../../miao-plugin/apps/profile/ProfileRank.js')
+  CharRank = ProfileRankModule.default
+  if (typeof ProfileRankModule.setRankRenderer === 'function') {
+    CharRankStatus = logger.green('✔ 接口可用')
+  } else if (CharRank && typeof CharRank.renderCharRankList === 'function') {
+    CharRankStatus = logger.green('✔ 接口可用')
+  } else {
+    ProfileRankReason = '当前 miao-plugin 未提供可注入的排行渲染接口'
+    CharRankStatus = logger.yellow(`⚠ 已跳过：${ProfileRankReason}`)
   }
 } catch (err) {
-  CharRankStatus = `${logger.red('✖ 注入失败')}\n${logger.red(err?.message || err)}`
+  ProfileRankReason = err?.message || String(err)
+  CharRankStatus = `${logger.red('✖ 加载失败')}\n${logger.red(ProfileRankReason)}`
 }
 
 let defWeapon = {
@@ -486,8 +498,13 @@ const ArkInit = {
         return true
       }
     }
-    if (ProfileDetail && CharRank) {
+    if (ProfileDetail && typeof ProfileDetail.render === 'function') {
+      const originalProfileDetailRender = ProfileDetail.render.bind(ProfileDetail)
       ProfileDetail.render = async (e, char, mode = 'profile', params = {}) => {
+        if (e._autoProfile) {
+          return originalProfileDetailRender(e, char, mode, params)
+        }
+
         let selfUser = await MysApi.initUser(e)
 
         if (!selfUser) {
@@ -741,8 +758,10 @@ const ArkInit = {
         }
         return true
       }
+    }
 
-      CharRank.renderCharRankList = async function({ e, uids, char, mode, groupId }) {
+    if (typeof ProfileRankModule?.setRankRenderer === 'function' || (CharRank && typeof CharRank.renderCharRankList === 'function')) {
+      const arkRankRenderer = async function({ e, uids, char, mode, groupId }) {
         let list = []
         for (let ds of uids) {
           let uid = ds.uid || ds.value
@@ -915,12 +934,30 @@ const ArkInit = {
           pageGotoParams: { waitUntil: 'networkidle2' }
         }, { e, scale: 1.4, retType: 'base64' }), new Button(e).profile(char)])
       }
+      if (typeof ProfileRankModule?.setRankRenderer === 'function') {
+        ProfileRankHooked = ProfileRankModule.setRankRenderer(arkRankRenderer) === true
+      } else {
+        CharRank.renderCharRankList = arkRankRenderer
+        ProfileRankHooked = CharRank.renderCharRankList === arkRankRenderer
+      }
     }
-    const shouldReplace = !ProfileDetail || !CharRank
+    const profileDetailHooked = Boolean(ProfileDetail && typeof ProfileDetail.render === 'function')
+    const charRankHooked = ProfileRankHooked
+    if (profileDetailHooked) {
+      ProfileDetailStatus = logger.green('✔ 注入成功')
+    }
+    if (charRankHooked) {
+      CharRankStatus = logger.green('✔ 注入成功')
+    }
     return {
-      ProfileDetail: ProfileDetailStatus || logger.red('✖ 注入失败（未替换文件）'),
-      CharRank: CharRankStatus || logger.red('✖ 注入失败（未替换文件）'),
-      shouldReplace
+      ProfileDetail: ProfileDetailStatus || logger.yellow('⚠ 未启用'),
+      CharRank: CharRankStatus || logger.yellow('⚠ 已跳过'),
+      profileDetail: { state: profileDetailHooked ? 'hooked' : 'unavailable' },
+      profileRank: {
+        state: charRankHooked ? 'hooked' : 'incompatible',
+        reason: ProfileRankReason
+      },
+      shouldReplace: false
     }
   }
 }

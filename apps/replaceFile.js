@@ -27,7 +27,7 @@ export class replaceFile extends plugin {
   readBackupData() {
     const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'))
     const defaults = JSON.parse(fs.readFileSync(DEFAULT_PATH, 'utf8'))
-    return { ...config, ...defaults }
+    return { ...defaults, ...config }
   }
 
   /** 写入备份配置 */
